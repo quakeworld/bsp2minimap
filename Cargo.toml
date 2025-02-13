@@ -16,7 +16,7 @@ include = [
 
 [dependencies]
 anyhow = "1.0.95"
-bspparser = "0.10.0"
+bspparser = "0.10.1"
 image = "0.25.5"
 svg = "0.18.0"
 

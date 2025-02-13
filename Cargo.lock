@@ -155,9 +155,9 @@ dependencies = [
 
 [[package]]
 name = "bspparser"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74f2c78a335093fe95c7a8be44caa45b619d4212c58564c8643584dc6e74d27b"
+checksum = "d5372b9490bba7dd46fa37e6b9f96c2c61fb931a9fd9d73b388219f3996f2eb6"
 dependencies = [
  "anyhow",
  "binrw",
