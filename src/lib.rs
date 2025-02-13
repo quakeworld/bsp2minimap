@@ -3,6 +3,7 @@ use bspparser::helpers::{
     get_face_texture, get_face_vertice_indexes, get_face_vertices, read_texture_image, TextureScale,
 };
 use bspparser::{BspFile, Face};
+use color::{Oklch, OpaqueColor, Srgb};
 use std::collections::HashMap;
 use std::io::{Read, Seek};
 
@@ -39,7 +40,7 @@ where
     }).collect();
 
     // get average color for each texture_name
-    let mut color_per_tex_name: HashMap<String, (u32, u32, u32)> = HashMap::new();
+    let mut color_per_tex_name: HashMap<String, OpaqueColor<Srgb>> = HashMap::new();
 
     for tex in &bsp.textures {
         let im = read_texture_image(r, tex, TextureScale::Eighth)?;
@@ -59,7 +60,10 @@ where
         g /= total;
         b /= total;
 
-        color_per_tex_name.insert(tex.name.to_string(), (r as u32, g as u32, b as u32));
+        color_per_tex_name.insert(
+            tex.name.to_string(),
+            OpaqueColor::new([r / 255., g / 255., b / 255.]),
+        );
     }
 
     // 2. Generate Polygons paths
@@ -72,7 +76,12 @@ where
                 .iter()
                 .map(|vertex_index| pvertices[*vertex_index as usize])
                 .collect::<Vec<(f32, f32)>>();
-            let texture_name = get_face_texture(&bsp, face).name.to_string();
+
+            let texture_name = match get_face_texture(&bsp, face) {
+                Ok(tex) => tex.name.to_string(),
+                Err(_) => "missing".to_string(),
+            };
+
             StuffToDraw {
                 points: points.clone(),
                 texture_name,
@@ -98,7 +107,26 @@ where
 
     let mut bsp_group = svg::node::element::Group::new().set("id", "bsp_ref");
 
+    let min_z = stuff_to_draw
+        .iter()
+        .map(|s| s.min_z)
+        .reduce(f32::min)
+        .unwrap();
+    let max_z = stuff_to_draw
+        .iter()
+        .map(|s| s.max_z)
+        .reduce(f32::max)
+        .unwrap();
+
     for item in stuff_to_draw.iter() {
+        let fill = *color_per_tex_name
+            .get(&item.texture_name)
+            .unwrap_or(&OpaqueColor::new([0., 0., 0.]));
+
+        // z in relation to map min/max z [0-1]
+        let zfac = (2. * (item.min_z - min_z) / (max_z - min_z)).clamp(1., 1.5);
+        let fill: OpaqueColor<Oklch> = fill.convert().map(|l, c, h| [l * zfac, c + 0.01, h]);
+
         let points_str = item
             .points
             .iter()
@@ -106,20 +134,10 @@ where
             .collect::<Vec<String>>()
             .join(" ");
 
-        let fill_color = color_per_tex_name
-            .get(&item.texture_name)
-            .unwrap_or(&(255, 255, 255));
-
-        // convert to hex representation
-        let fill_color = format!(
-            "#{:02x}{:02x}{:02x}",
-            fill_color.0, fill_color.1, fill_color.2
-        );
-
         bsp_group = bsp_group.add(
             svg::node::element::Polygon::new()
                 .set("points", points_str)
-                .set("fill", fill_color),
+                .set("fill", format!("{:02x}", fill.to_rgba8(),)),
         );
     }
 
@@ -212,14 +230,17 @@ pub fn filter_faces(bsp: &BspFile) -> Vec<Face> {
         .iter()
         .cloned()
         .filter(|face| {
-            let texture_name = get_face_texture(bsp, face).name.to_string();
+            let texture_name = match get_face_texture(bsp, face) {
+                Ok(tex) => tex.name.to_string(),
+                Err(_) => "missing".to_string(),
+            };
             !is_ignored_texture(&texture_name)
         })
         .collect()
 }
 
 pub fn is_ignored_texture(name: &str) -> bool {
-    let ignored_names = ["clip", "hint", "trigger", "163"];
+    let ignored_names = ["clip", "hint", "trigger", "missing"];
 
     if ignored_names.iter().any(|n| *n == name) {
         return true;
@@ -233,13 +254,12 @@ pub fn is_ignored_texture(name: &str) -> bool {
 mod tests {
     use super::*;
     use anyhow::Result;
-    use image::save_buffer;
     use std::fs::File;
 
     #[test]
     fn test_convert() -> Result<()> {
-        let mapnames = ["dm2", "dm3_gpl", "dm4", "e1m2", "schloss"];
-        let mapnames = ["e1m2"];
+        // let mapnames = ["dm2", "dm3_gpl", "dm4", "e1m2", "schloss"];
+        let mapnames = ["dm3_gpl"];
 
         for name in mapnames.iter() {
             let file = &mut File::open(format!("tests/files/{}.bsp", name))?;
